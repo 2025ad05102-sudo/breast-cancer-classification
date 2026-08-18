@@ -1,17 +1,8 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
-
-# Machine Learning Imports
-from sklearn.datasets import load_breast_cancer
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LogisticRegression
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.naive_bayes import GaussianNB
-from sklearn.ensemble import RandomForestClassifier
+import pickle
+import os
 
 # Evaluation Metrics Imports
 from sklearn.metrics import (
@@ -24,43 +15,78 @@ from sklearn.metrics import (
 st.set_page_config(page_title="BC LAB: Model Evaluation App", layout="wide")
 
 st.title("🔬 Breast Cancer Wisconsin Diagnostic Evaluation Dashboard")
-st.write("Fulfill your BITS Virtual Lab Assignment steps by uploading test data and choosing a model.")
+st.write("Fulfill your BITS Virtual Lab Assignment steps by evaluating pre-trained model pickle files.")
 
 # ----------------------------------------------------
-# 1. TRAIN THE MODELS AUTOMATICALLY ON GROUND TRUTH
+# 1. RESOLVE DIRECTORY PATHS AND LOAD MODEL PICKLES
 # ----------------------------------------------------
 @st.cache_resource
-def train_and_cache_models():
-    # Load dataset
-    data = load_breast_cancer()
-    X = pd.DataFrame(data.data, columns=data.feature_names)
-    y = data.target  # 0: Malignant, 1: Benign
+def load_github_pickle_models():
+    # Detect if code runs locally or deep within Streamlit Cloud repo root
+    # Adjust paths automatically if files live inside the 'model' subdirectory
+    possible_paths = [
+        "model", 
+        os.path.join(os.path.dirname(__file__), "model"),
+        "."
+    ]
     
-    # Stratified Train/Test split to mimic baseline environment
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42, stratify=y)
-    
-    # Scale features
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    
-    # Dictionary to hold models
-    models = {
-        "Logistic Regression": LogisticRegression(max_iter=10000, random_state=42),
-        "Decision Tree Classifier": DecisionTreeClassifier(random_state=42),
-        "K-Nearest Neighbor Classifier": KNeighborsClassifier(n_neighbors=5),
-        "Naive Bayes Classifier": GaussianNB(),
-        "Ensemble Model - Random Forest": RandomForestClassifier(random_state=42)
+    target_dir = None
+    for path in possible_paths:
+        if os.path.isdir(path) and any(f.endswith('.pkl') for f in os.listdir(path)):
+            target_dir = path
+            break
+            
+    if target_dir is None:
+        st.error("🚨 System Error: Could not locate the '.pkl' files directory in your repository layout.")
+        st.info("Ensure your pickle files are placed in a folder named 'model' or directly alongside app.py.")
+        st.stop()
+
+    # Dictionary mapping display selection names to specific pickle filenames
+    model_mapping = {
+        "Logistic Regression": "logistic_regression.pkl",
+        "Decision Tree Classifier": "decision_tree.pkl",
+        "K-Nearest Neighbor Classifier": "knn.pkl",
+        "Naive Bayes Classifier - Gaussian or Multinomial": "gaussian_naive_bayes.pkl",
+        "Ensemble Model - Random Forest": "random_forest.pkl"
     }
     
-    # Train all models
-    for name, model in models.items():
-        model.fit(X_train_scaled, y_train)
+    loaded_models = {}
+    for display_name, file_name in model_mapping.items():
+        file_path = os.path.join(target_dir, file_name)
         
-    return models, scaler, data.feature_names
+        # Soft fallback if names differ slightly (e.g. random_forest.pkl vs ensemble.pkl)
+        if not os.path.exists(file_path):
+            # Attempt to locate by fuzzy text matches inside directory files list
+            all_files = os.listdir(target_dir)
+            matched = [f for f in all_files if file_name.split('.')[0] in f or f.endswith('.pkl')]
+            if matched:
+                # Use alternative fallback pick found in target pathing arrays
+                file_path = os.path.join(target_dir, matched[0])
+            else:
+                st.warning(f"⚠️ Missing Expected Model File: {file_name}")
+                continue
+                
+        try:
+            with open(file_path, 'rb') as f:
+                loaded_models[display_name] = pickle.load(f)
+        except Exception as e:
+            st.error(f"Failed to unpickle model file {file_name}: {e}")
+            
+    return loaded_models
 
-# Load models and pipelines
-models_dict, data_scaler, feature_names = train_and_cache_models()
+# Run safe resource cache extraction
+models_dict = load_github_pickle_models()
 
+# Hardcoded feature feature array tracking canonical layout requirements for the Kaggle dataset
+# Standard sequence utilized during model production
+EXPECTED_FEATURES = [
+    'radius_mean', 'texture_mean', 'perimeter_mean', 'area_mean', 'smoothness_mean',
+    'compactness_mean', 'concavity_mean', 'concave points_mean', 'symmetry_mean', 'fractal_dimension_mean',
+    'radius_se', 'texture_se', 'perimeter_se', 'area_se', 'smoothness_se',
+    'compactness_se', 'concavity_se', 'concave points_se', 'symmetry_se', 'fractal_dimension_se',
+    'radius_worst', 'texture_worst', 'perimeter_worst', 'area_worst', 'smoothness_worst',
+    'compactness_worst', 'concavity_worst', 'concave points_worst', 'symmetry_worst', 'fractal_dimension_worst'
+]
 
 # ----------------------------------------------------
 # 2. STREAMLIT UI: INPUT & CONFIGURATIONS
@@ -71,31 +97,17 @@ st.sidebar.header("📁 User Action Controls")
 uploaded_file = st.sidebar.file_uploader("Upload your test dataset (CSV Format)", type=["csv"])
 
 # Feature b: Model selection dropdown
-selected_model_name = st.sidebar.selectbox(
-    "Choose ML Model for Evaluation", 
-    list(models_dict.keys())
-)
-
-# Provide sample download helper so grading schema can be tested quickly
-st.sidebar.markdown("---")
-st.sidebar.write("💡 **No Test File?**")
-if st.sidebar.button("Generate Sample Test CSV data"):
-    raw_data = load_breast_cancer()
-    df_sample = pd.DataFrame(raw_data.data, columns=raw_data.feature_names)
-    # Ensure mapping matches Kaggle format ('M' / 'B') or standard target column
-    df_sample['diagnosis'] = ['M' if t == 0 else 'B' for t in raw_data.target]
-    
-    # Sample out 100 entries as a baseline test file
-    sample_csv = df_sample.sample(100, random_state=12).to_csv(index=False)
-    st.sidebar.download_button(
-        label="📥 Download Sample Test Data",
-        data=sample_csv,
-        file_name="breast_cancer_test_data.csv",
-        mime="text/csv"
+if models_dict:
+    selected_model_name = st.sidebar.selectbox(
+        "Choose ML Model for Evaluation", 
+        list(models_dict.keys())
     )
+else:
+    st.error("No valid model files loaded.")
+    st.stop()
 
 # ----------------------------------------------------
-# 3. PROCESSING PIPELINE & INFERENCE
+# 3. PROCESSING PIPELINE & INFERENCE VIA PICKLES
 # ----------------------------------------------------
 if uploaded_file is not None:
     try:
@@ -103,8 +115,7 @@ if uploaded_file is not None:
         user_df = pd.read_csv(uploaded_file)
         st.success("Test dataset loaded successfully!")
         
-        # Data Cleaning: Handle Kaggle's explicit column variations
-        # Drop metadata columns if they exist in the uploaded file
+        # Clean metadata features out instantly if they appear inside Kaggle sheets
         cols_to_drop = ['id', 'Unnamed: 32']
         user_df = user_df.drop(columns=[c for c in cols_to_drop if c in user_df.columns])
         
@@ -119,49 +130,46 @@ if uploaded_file is not None:
             st.error("Error: Could not identify a target classification column (e.g., 'diagnosis') in the CSV.")
             st.stop()
             
-        # Clean target variables to numeric indicators (0: Malignant, 1: Benign)
-        # Kaggle uses 'M' and 'B'
+        # Standardize target values to binary classes (0: Malignant, 1: Benign)
         y_user = user_df[target_col].copy()
         if y_user.dtype == 'O': 
             y_user = y_user.map({'M': 0, 'B': 1, 'malignant': 0, 'benign': 1})
             
-        # Extract features and ensure order matches training features
+        # Isolate baseline classification inputs
         X_user = user_df.drop(columns=[target_col])
         
-        # Match scikit-learn standard feature mapping vs Kaggle header text structures
-        # Mapping Kaggle column layouts to standard dataset fields
+        # Enforce name formatting compatibility matches with training features schema
+        # Normalizes spaces/underscores (e.g., 'radius_mean' vs 'radius mean')
         rename_dict = {}
         for col in X_user.columns:
-            cleaned_col = col.replace('_', ' ').strip().lower()
-            for feat in feature_names:
-                if cleaned_col == feat.lower().strip() or cleaned_col == feat.replace(' ', '').lower():
+            cleaned_col = str(col).replace('_', ' ').strip().lower()
+            for feat in EXPECTED_FEATURES:
+                clean_feat = str(feat).replace('_', ' ').strip().lower()
+                if cleaned_col == clean_feat:
                     rename_dict[col] = feat
         X_user = X_user.rename(columns=rename_dict)
         
-        # Handle structural missing column safety checks
-        missing_cols = [c for c in feature_names if c not in X_user.columns]
+        # Safety Check: If names mismatch structural profiles, force override sequencing
+        missing_cols = [c for c in EXPECTED_FEATURES if c not in X_user.columns]
         if missing_cols:
-            st.warning(f"Note: Adjusting column naming syntax compatibility indices.")
-            # Fallback alignment using exact column sequence if named maps fail
-            if len(X_user.columns) == len(feature_names):
-                X_user.columns = feature_names
+            if len(X_user.columns) == len(EXPECTED_FEATURES):
+                X_user.columns = EXPECTED_FEATURES
             else:
-                st.error(f"Dataset column footprint mismatch! Expected columns matching features. Missing: {missing_cols}")
+                st.error(f"Column counts mismatch training space specifications. Missing: {missing_cols}")
                 st.stop()
                 
-        # Reorder features explicitly
-        X_user = X_user[feature_names]
+        # Lock column sequencing order
+        X_user = X_user[EXPECTED_FEATURES]
         
-        # Scale test data safely using baseline fitted scalars
-        X_user_scaled = data_scaler.transform(X_user)
-        
-        # Select active model and generate inference arrays
+        # Extract operational active model out from pickle store
         model = models_dict[selected_model_name]
-        y_pred = model.predict(X_user_scaled)
         
-        # Check if model supports probability vectors for precise AUC rendering
+        # Generate Predictions directly using the pickled model
+        y_pred = model.predict(X_user)
+        
+        # Determine performance confidence scores if supported by object class
         if hasattr(model, "predict_proba"):
-            y_proba = model.predict_proba(X_user_scaled)[:, 1]
+            y_proba = model.predict_proba(X_user)[:, 1]
         else:
             y_proba = y_pred
 
@@ -170,7 +178,6 @@ if uploaded_file is not None:
         # ----------------------------------------------------
         st.subheader(f"📈 Evaluation Metrics: {selected_model_name}")
         
-        # Metric Calculations
         acc = accuracy_score(y_user, y_pred)
         precision = precision_score(y_user, y_pred, zero_division=0)
         recall = recall_score(y_user, y_pred, zero_division=0)
@@ -180,9 +187,9 @@ if uploaded_file is not None:
         try:
             auc = roc_auc_score(y_user, y_proba)
         except ValueError:
-            auc = 0.0 # Fallback calculation alternative if single-class variant encountered
+            auc = 0.0
             
-        # Metric Display Layout Grid
+        # Display Metric Matrix Configuration layout
         col1, col2, col3, col4, col5, col6 = st.columns(6)
         col1.metric(label="Accuracy", value=f"{acc:.4f}")
         col2.metric(label="AUC Score", value=f"{auc:.4f}")
@@ -208,12 +215,11 @@ if uploaded_file is not None:
             cm_df = pd.DataFrame(cm, index=["Actual Malignant", "Actual Benign"], columns=["Predicted Malignant", "Predicted Benign"])
             st.dataframe(cm_df)
             
-            # Interactive visualization context check
             st.info("💡 Row labels describe True Classes; Column layouts display Predicted values.")
             
     except Exception as e:
-        st.error(f"An unexpected data processing mismatch occurred: {e}")
-        st.info("Tip: Use the sidebar button to generate an ideally-formatted sample test file.")
+        st.error(f"An error occurred during evaluation profiling: {e}")
 
 else:
-    st.info("👈 Please upload a processed test data snippet (CSV) in the left sidebar to generate performance evaluations.")
+    st.info("👈 Please upload a processed verification dataset (CSV snippet) in the left sidebar area to evaluate loaded models.")
+
