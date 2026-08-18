@@ -1,289 +1,219 @@
 
-
 import streamlit as st
 import pandas as pd
-import joblib
-import matplotlib.pyplot as plt
-import seaborn as sns
+import numpy as np
 
+# Machine Learning Imports
+from sklearn.datasets import load_breast_cancer
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.ensemble import RandomForestClassifier
+
+# Evaluation Metrics Imports
 from sklearn.metrics import (
-    accuracy_score,
-    precision_score,
-    recall_score,
-    f1_score,
-    roc_auc_score,
-    matthews_corrcoef,
-    confusion_matrix,
-    classification_report
+    accuracy_score, roc_auc_score, precision_score, 
+    recall_score, f1_score, matthews_corrcoef, 
+    confusion_matrix, classification_report
 )
 
-# -----------------------------
-# Page Configuration
-# -----------------------------
-st.set_page_config(
-    page_title="Breast Cancer Classification",
-    layout="wide"
+# Set page configurations
+st.set_page_config(page_title="BC LAB: Model Evaluation App", layout="wide")
+
+st.title("🔬 Breast Cancer Wisconsin Diagnostic Evaluation Dashboard")
+st.write("Fulfill your BITS Virtual Lab Assignment steps by uploading test data and choosing a model.")
+
+# ----------------------------------------------------
+# 1. TRAIN THE MODELS AUTOMATICALLY ON GROUND TRUTH
+# ----------------------------------------------------
+@st.cache_resource
+def train_and_cache_models():
+    # Load dataset
+    data = load_breast_cancer()
+    X = pd.DataFrame(data.data, columns=data.feature_names)
+    y = data.target  # 0: Malignant, 1: Benign
+    
+    # Stratified Train/Test split to mimic baseline environment
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42, stratify=y)
+    
+    # Scale features
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    
+    # Dictionary to hold models
+    models = {
+        "Logistic Regression": LogisticRegression(max_iter=10000, random_state=42),
+        "Decision Tree Classifier": DecisionTreeClassifier(random_state=42),
+        "K-Nearest Neighbor Classifier": KNeighborsClassifier(n_neighbors=5),
+        "Naive Bayes Classifier": GaussianNB(),
+        "Ensemble Model - Random Forest": RandomForestClassifier(random_state=42)
+    }
+    
+    # Train all models
+    for name, model in models.items():
+        model.fit(X_train_scaled, y_train)
+        
+    return models, scaler, data.feature_names
+
+# Load models and pipelines
+models_dict, data_scaler, feature_names = train_and_cache_models()
+
+
+# ----------------------------------------------------
+# 2. STREAMLIT UI: INPUT & CONFIGURATIONS
+# ----------------------------------------------------
+st.sidebar.header("📁 User Action Controls")
+
+# Feature a: Dataset upload option (CSV) [Test Data Only]
+uploaded_file = st.sidebar.file_uploader("Upload your test dataset (CSV Format)", type=["csv"])
+
+# Feature b: Model selection dropdown
+selected_model_name = st.sidebar.selectbox(
+    "Choose ML Model for Evaluation", 
+    list(models_dict.keys())
 )
 
-st.title("Breast Cancer Classification Models")
+# Provide sample download helper so grading schema can be tested quickly
+st.sidebar.markdown("---")
+st.sidebar.write("💡 **No Test File?**")
+if st.sidebar.button("Generate Sample Test CSV data"):
+    raw_data = load_breast_cancer()
+    df_sample = pd.DataFrame(raw_data.data, columns=raw_data.feature_names)
+    # Ensure mapping matches Kaggle format ('M' / 'B') or standard target column
+    df_sample['diagnosis'] = ['M' if t == 0 else 'B' for t in raw_data.target]
+    
+    # Sample out 100 entries as a baseline test file
+    sample_csv = df_sample.sample(100, random_state=12).to_csv(index=False)
+    st.sidebar.download_button(
+        label="📥 Download Sample Test Data",
+        data=sample_csv,
+        file_name="breast_cancer_test_data.csv",
+        mime="text/csv"
+    )
 
-st.markdown("""
-Upload a test dataset and evaluate the trained models.
-""")
-
-# -----------------------------
-# Load Models
-# -----------------------------
-models = {
-    "Logistic Regression": joblib.load("model/logistic_regression.pkl"),
-    "Decision Tree": joblib.load("model/decision_tree.pkl"),
-    "KNN": joblib.load("model/knn.pkl"),
-    "Naive Bayes": joblib.load("model/naive_bayes.pkl"),
-    "Random Forest": joblib.load("model/random_forest.pkl")
-}
-
-# -----------------------------
-# Model Selection
-# -----------------------------
-selected_model_name = st.selectbox(
-    "Select a Model",
-    list(models.keys())
-)
-
-selected_model = models[selected_model_name]
-
-# -----------------------------
-# File Upload
-# -----------------------------
-uploaded_file = st.file_uploader(
-    "Upload Test Dataset (CSV)",
-    type=["csv"]
-)
-
-if uploaded_file:
-
-    df = pd.read_csv(uploaded_file)
-
-    st.subheader("Uploaded Dataset")
-
-    st.dataframe(df.head())
-
-    if "diagnosis" not in df.columns:
-        st.error(
-            "The uploaded dataset must contain a 'diagnosis' column."
-        )
-        st.stop()
-
-    # --------------------------------------
-    # Encode Diagnosis
-    # --------------------------------------
-    df["diagnosis"] = df["diagnosis"].replace({
-        "M": 1,
-        "B": 0
-    })
-
-    y_test = df["diagnosis"]
-
-    X_test = df.drop("diagnosis", axis=1)
-
-    # Remove id column if present
-# Remove unused columns
-
-if "id" in X_test.columns:
-    X_test.drop("id", axis=1, inplace=True)
-
-if "Unnamed: 32" in X_test.columns:
-    X_test.drop("Unnamed: 32", axis=1, inplace=True)
-
-
-    # --------------------------------------
-    # Predictions
-    # --------------------------------------
-    # -----------------------------
-# Fix Feature Mismatch
-# -----------------------------
-
-try:
-
-    if hasattr(selected_model, "feature_names_in_"):
-
-        expected_cols = list(selected_model.feature_names_in_)
-
-        missing_cols = [
-            col for col in expected_cols
-            if col not in X_test.columns
-        ]
-
-        extra_cols = [
-            col for col in X_test.columns
-            if col not in expected_cols
-        ]
-
-        if missing_cols:
-            st.error(f"Missing columns: {missing_cols}")
-            st.stop()
-
-        if extra_cols:
-            st.warning(
-                f"Extra columns removed: {extra_cols}"
-            )
-
-        X_test = X_test[expected_cols]
-
-    y_pred = selected_model.predict(X_test)
-
-    if hasattr(selected_model, "predict_proba"):
-        y_prob = selected_model.predict_proba(X_test)[:, 1]
-    else:
-        y_prob = y_pred
-
-except Exception as e:
-
-    st.error("Prediction failed")
-
-    st.write("Expected Columns:")
+# ----------------------------------------------------
+# 3. PROCESSING PIPELINE & INFERENCE
+# ----------------------------------------------------
+if uploaded_file is not None:
     try:
-        st.write(list(selected_model.feature_names_in_))
-    except:
-        st.write("Not available")
-
-    st.write("Uploaded Columns:")
-    st.write(list(X_test.columns))
-
-    st.exception(e)
-
-    st.stop()
-
-    # --------------------------------------
-    # Metrics
-    # --------------------------------------
-    accuracy = accuracy_score(y_test, y_pred)
-    auc = roc_auc_score(y_test, y_prob)
-    precision = precision_score(y_test, y_pred)
-    recall = recall_score(y_test, y_pred)
-    f1 = f1_score(y_test, y_pred)
-    mcc = matthews_corrcoef(y_test, y_pred)
-
-    metrics_df = pd.DataFrame({
-        "Metric": [
-            "Accuracy",
-            "AUC",
-            "Precision",
-            "Recall",
-            "F1 Score",
-            "MCC"
-        ],
-        "Value": [
-            accuracy,
-            auc,
-            precision,
-            recall,
-            f1,
-            mcc
-        ]
-    })
-
-    st.subheader("Evaluation Metrics")
-
-    st.dataframe(metrics_df)
-
-    # --------------------------------------
-    # Confusion Matrix
-    # --------------------------------------
-    st.subheader("Confusion Matrix")
-
-    cm = confusion_matrix(y_test, y_pred)
-
-    fig, ax = plt.subplots(figsize=(5, 4))
-
-    sns.heatmap(
-        cm,
-        annot=True,
-        fmt='d',
-        cmap='Blues',
-        ax=ax
-    )
-
-    ax.set_xlabel("Predicted")
-    ax.set_ylabel("Actual")
-    ax.set_title("Confusion Matrix")
-
-    st.pyplot(fig)
-
-    # --------------------------------------
-    # Classification Report
-    # --------------------------------------
-    st.subheader("Classification Report")
-
-    report = classification_report(
-        y_test,
-        y_pred,
-        output_dict=True
-    )
-
-    report_df = pd.DataFrame(report).transpose()
-
-    st.dataframe(report_df)
-
-    # --------------------------------------
-    # Predictions
-    # --------------------------------------
-    st.subheader("Predictions")
-
-    prediction_df = pd.DataFrame({
-        "Actual": y_test,
-        "Predicted": y_pred
-    })
-
-    prediction_df["Actual"] = prediction_df["Actual"].replace({
-        1: "M",
-        0: "B"
-    })
-
-    prediction_df["Predicted"] = prediction_df["Predicted"].replace({
-        1: "M",
-        0: "B"
-    })
-
-    st.dataframe(prediction_df.head(20))
-
-    # --------------------------------------
-    # Comparison of All Models
-    # --------------------------------------
-    st.subheader("Comparison of All Models")
-
-    results = []
-
-    for model_name, model in models.items():
-
-        pred = model.predict(X_test)
-
+        # Load user file
+        user_df = pd.read_csv(uploaded_file)
+        st.success("Test dataset loaded successfully!")
+        
+        # Data Cleaning: Handle Kaggle's explicit column variations
+        # Drop metadata columns if they exist in the uploaded file
+        cols_to_drop = ['id', 'Unnamed: 32']
+        user_df = user_df.drop(columns=[c for c in cols_to_drop if c in user_df.columns])
+        
+        # Locate Target column variations ('diagnosis' or 'target')
+        target_col = None
+        for col in ['diagnosis', 'target', 'Class', 'class']:
+            if col in user_df.columns:
+                target_col = col
+                break
+                
+        if target_col is None:
+            st.error("Error: Could not identify a target classification column (e.g., 'diagnosis') in the CSV.")
+            st.stop()
+            
+        # Clean target variables to numeric indicators (0: Malignant, 1: Benign)
+        # Kaggle uses 'M' and 'B'
+        y_user = user_df[target_col].copy()
+        if y_user.dtype == 'O': 
+            y_user = y_user.map({'M': 0, 'B': 1, 'malignant': 0, 'benign': 1})
+            
+        # Extract features and ensure order matches training features
+        X_user = user_df.drop(columns=[target_col])
+        
+        # Match scikit-learn standard feature mapping vs Kaggle header text structures
+        # Mapping Kaggle column layouts to standard dataset fields
+        rename_dict = {}
+        for col in X_user.columns:
+            cleaned_col = col.replace('_', ' ').strip().lower()
+            for feat in feature_names:
+                if cleaned_col == feat.lower().strip() or cleaned_col == feat.replace(' ', '').lower():
+                    rename_dict[col] = feat
+        X_user = X_user.rename(columns=rename_dict)
+        
+        # Handle structural missing column safety checks
+        missing_cols = [c for c in feature_names if c not in X_user.columns]
+        if missing_cols:
+            st.warning(f"Note: Adjusting column naming syntax compatibility indices.")
+            # Fallback alignment using exact column sequence if named maps fail
+            if len(X_user.columns) == len(feature_names):
+                X_user.columns = feature_names
+            else:
+                st.error(f"Dataset column footprint mismatch! Expected columns matching features. Missing: {missing_cols}")
+                st.stop()
+                
+        # Reorder features explicitly
+        X_user = X_user[feature_names]
+        
+        # Scale test data safely using baseline fitted scalars
+        X_user_scaled = data_scaler.transform(X_user)
+        
+        # Select active model and generate inference arrays
+        model = models_dict[selected_model_name]
+        y_pred = model.predict(X_user_scaled)
+        
+        # Check if model supports probability vectors for precise AUC rendering
         if hasattr(model, "predict_proba"):
-            prob = model.predict_proba(X_test)[:, 1]
+            y_proba = model.predict_proba(X_user_scaled)[:, 1]
         else:
-            prob = pred
+            y_proba = y_pred
 
-        results.append([
-            model_name,
-            accuracy_score(y_test, pred),
-            roc_auc_score(y_test, prob),
-            precision_score(y_test, pred),
-            recall_score(y_test, pred),
-            f1_score(y_test, pred),
-            matthews_corrcoef(y_test, pred)
-        ])
+        # ----------------------------------------------------
+        # 4. COMPUTE & DISPLAY EVALUATION METRICS
+        # ----------------------------------------------------
+        st.subheader(f"📈 Evaluation Metrics: {selected_model_name}")
+        
+        # Metric Calculations
+        acc = accuracy_score(y_user, y_pred)
+        precision = precision_score(y_user, y_pred, zero_division=0)
+        recall = recall_score(y_user, y_pred, zero_division=0)
+        f1 = f1_score(y_user, y_pred, zero_division=0)
+        mcc = matthews_corrcoef(y_user, y_pred)
+        
+        try:
+            auc = roc_auc_score(y_user, y_proba)
+        except ValueError:
+            auc = 0.0 # Fallback calculation alternative if single-class variant encountered
+            
+        # Metric Display Layout Grid
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        col1.metric(label="Accuracy", value=f"{acc:.4f}")
+        col2.metric(label="AUC Score", value=f"{auc:.4f}")
+        col3.metric(label="Precision", value=f"{precision:.4f}")
+        col4.metric(label="Recall", value=f"{recall:.4f}")
+        col5.metric(label="F1 Score", value=f"{f1:.4f}")
+        col6.metric(label="MCC Score", value=f"{mcc:.4f}")
 
-    comparison_df = pd.DataFrame(
-        results,
-        columns=[
-            "Model",
-            "Accuracy",
-            "AUC",
-            "Precision",
-            "Recall",
-            "F1",
-            "MCC"
-        ]
-    )
+        # ----------------------------------------------------
+        # 5. CONFUSION MATRIX & CLASSIFICATION REPORT
+        # ----------------------------------------------------
+        st.markdown("---")
+        layout_col1, layout_col2 = st.columns(2)
+        
+        with layout_col1:
+            st.subheader("📋 Classification Report")
+            rep_dict = classification_report(y_user, y_pred, target_names=["Malignant", "Benign"], output_dict=True)
+            st.dataframe(pd.DataFrame(rep_dict).transpose().style.format("{:.4f}"))
+            
+        with layout_col2:
+            st.subheader("🔢 Confusion Matrix")
+            cm = confusion_matrix(y_user, y_pred)
+            cm_df = pd.DataFrame(cm, index=["Actual Malignant", "Actual Benign"], columns=["Predicted Malignant", "Predicted Benign"])
+            st.dataframe(cm_df)
+            
+            # Interactive visualization context check
+            st.info("💡 Row labels describe True Classes; Column layouts display Predicted values.")
+            
+    except Exception as e:
+        st.error(f"An unexpected data processing mismatch occurred: {e}")
+        st.info("Tip: Use the sidebar button to generate an ideally-formatted sample test file.")
 
-    st.dataframe(comparison_df)
+else:
+    st.info("👈 Please upload a processed test data snippet (CSV) in the left sidebar to generate performance evaluations.")
