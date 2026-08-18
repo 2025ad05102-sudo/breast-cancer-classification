@@ -1,123 +1,239 @@
 
+
 import streamlit as st
 import pandas as pd
+import joblib
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    roc_auc_score,
+    matthews_corrcoef,
+    confusion_matrix,
+    classification_report
+)
+
+# -----------------------------
+# Page Configuration
+# -----------------------------
+st.set_page_config(
+    page_title="Breast Cancer Classification",
+    layout="wide"
+)
 
 st.title("Breast Cancer Classification Models")
 
-selected_model = st.selectbox(
+st.markdown("""
+Upload a test dataset and evaluate the trained models.
+""")
+
+# -----------------------------
+# Load Models
+# -----------------------------
+models = {
+    "Logistic Regression": joblib.load("logistic_regression.pkl"),
+    "Decision Tree": joblib.load("decision_tree.pkl"),
+    "KNN": joblib.load("knn.pkl"),
+    "Naive Bayes": joblib.load("naive_bayes.pkl"),
+    "Random Forest": joblib.load("random_forest.pkl")
+}
+
+# -----------------------------
+# Model Selection
+# -----------------------------
+selected_model_name = st.selectbox(
     "Select a Model",
-    [
-        "Logistic Regression",
-        "Decision Tree",
-        "KNN",
-        "Naive Bayes",
-        "Random Forest"
-    ]
+    list(models.keys())
 )
 
+selected_model = models[selected_model_name]
+
+# -----------------------------
+# File Upload
+# -----------------------------
 uploaded_file = st.file_uploader(
     "Upload Test Dataset (CSV)",
     type=["csv"]
 )
 
-results = {
-    "Logistic Regression":[0.824658,0.856769,0.711330,0.459580,0.558391,0.472151],
-    "Decision Tree":[0.812836,0.751406,0.607579,0.632718,0.619894,0.495994],
-    "KNN":[0.835253,0.856804,0.678367,0.602801,0.638355,0.533721],
-    "Naive Bayes":[0.809304,0.861285,0.706399,0.358370,0.475507,0.406026],
-    "Random Forest":[0.862429,0.910280,0.750929,0.642903,0.692730,0.607817]
-}
-
-if uploaded_file is not None:
+if uploaded_file:
 
     df = pd.read_csv(uploaded_file)
 
-    st.subheader("Uploaded Test Data")
+    st.subheader("Uploaded Dataset")
+
     st.dataframe(df.head())
 
-    m = results[selected_model]
+    if "diagnosis" not in df.columns:
+        st.error(
+            "The uploaded dataset must contain a 'diagnosis' column."
+        )
+        st.stop()
+
+    # --------------------------------------
+    # Encode Diagnosis
+    # --------------------------------------
+    df["diagnosis"] = df["diagnosis"].replace({
+        "M": 1,
+        "B": 0
+    })
+
+    y_test = df["diagnosis"]
+
+    X_test = df.drop("diagnosis", axis=1)
+
+    # Remove id column if present
+    if "id" in X_test.columns:
+        X_test = X_test.drop("id", axis=1)
+
+    # Remove unnamed column if present
+    if "Unnamed: 32" in X_test.columns:
+        X_test = X_test.drop("Unnamed: 32", axis=1)
+
+    # --------------------------------------
+    # Predictions
+    # --------------------------------------
+    y_pred = selected_model.predict(X_test)
+
+    if hasattr(selected_model, "predict_proba"):
+        y_prob = selected_model.predict_proba(X_test)[:, 1]
+    else:
+        y_prob = y_pred
+
+    # --------------------------------------
+    # Metrics
+    # --------------------------------------
+    accuracy = accuracy_score(y_test, y_pred)
+    auc = roc_auc_score(y_test, y_prob)
+    precision = precision_score(y_test, y_pred)
+    recall = recall_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred)
+    mcc = matthews_corrcoef(y_test, y_pred)
+
+    metrics_df = pd.DataFrame({
+        "Metric": [
+            "Accuracy",
+            "AUC",
+            "Precision",
+            "Recall",
+            "F1 Score",
+            "MCC"
+        ],
+        "Value": [
+            accuracy,
+            auc,
+            precision,
+            recall,
+            f1,
+            mcc
+        ]
+    })
 
     st.subheader("Evaluation Metrics")
 
-    metrics_df = pd.DataFrame({
-        "Metric":["Accuracy","AUC","Precision","Recall","F1 Score","MCC"],
-        "Value":m
-    })
-
     st.dataframe(metrics_df)
 
+    # --------------------------------------
+    # Confusion Matrix
+    # --------------------------------------
     st.subheader("Confusion Matrix")
 
-    cm = pd.DataFrame(
-        [[50,10],
-         [8,75]],
-        columns=["Predicted Negative","Predicted Positive"],
-        index=["Actual Negative","Actual Positive"]
+    cm = confusion_matrix(y_test, y_pred)
+
+    fig, ax = plt.subplots(figsize=(5, 4))
+
+    sns.heatmap(
+        cm,
+        annot=True,
+        fmt='d',
+        cmap='Blues',
+        ax=ax
     )
 
-    st.dataframe(cm)
+    ax.set_xlabel("Predicted")
+    ax.set_ylabel("Actual")
+    ax.set_title("Confusion Matrix")
 
+    st.pyplot(fig)
+
+    # --------------------------------------
+    # Classification Report
+    # --------------------------------------
     st.subheader("Classification Report")
 
-    report = pd.DataFrame({
-        "Metric":["Precision","Recall","F1 Score"],
-        "Value":[m[2],m[3],m[4]]
+    report = classification_report(
+        y_test,
+        y_pred,
+        output_dict=True
+    )
+
+    report_df = pd.DataFrame(report).transpose()
+
+    st.dataframe(report_df)
+
+    # --------------------------------------
+    # Predictions
+    # --------------------------------------
+    st.subheader("Predictions")
+
+    prediction_df = pd.DataFrame({
+        "Actual": y_test,
+        "Predicted": y_pred
     })
 
-    st.dataframe(report)
+    prediction_df["Actual"] = prediction_df["Actual"].replace({
+        1: "M",
+        0: "B"
+    })
 
-st.subheader("Comparison of All Models")
+    prediction_df["Predicted"] = prediction_df["Predicted"].replace({
+        1: "M",
+        0: "B"
+    })
 
-comparison = pd.DataFrame({
-    "Model": [
-        "Logistic Regression",
-        "Decision Tree",
-        "KNN",
-        "Naive Bayes",
-        "Random Forest"
-    ],
-    "Accuracy": [
-        0.824658,
-        0.812836,
-        0.835253,
-        0.809304,
-        0.862429
-    ],
-    "AUC": [
-        0.856769,
-        0.751406,
-        0.856804,
-        0.861285,
-        0.910280
-    ],
-    "Precision": [
-        0.711330,
-        0.607579,
-        0.678367,
-        0.706399,
-        0.750929
-    ],
-    "Recall": [
-        0.459580,
-        0.632718,
-        0.602801,
-        0.358370,
-        0.642903
-    ],
-    "F1": [
-        0.558391,
-        0.619894,
-        0.638355,
-        0.475507,
-        0.692730
-    ],
-    "MCC": [
-        0.472151,
-        0.495994,
-        0.533721,
-        0.406026,
-        0.607817
-    ]
-})
+    st.dataframe(prediction_df.head(20))
 
-st.dataframe(comparison)
+    # --------------------------------------
+    # Comparison of All Models
+    # --------------------------------------
+    st.subheader("Comparison of All Models")
+
+    results = []
+
+    for model_name, model in models.items():
+
+        pred = model.predict(X_test)
+
+        if hasattr(model, "predict_proba"):
+            prob = model.predict_proba(X_test)[:, 1]
+        else:
+            prob = pred
+
+        results.append([
+            model_name,
+            accuracy_score(y_test, pred),
+            roc_auc_score(y_test, prob),
+            precision_score(y_test, pred),
+            recall_score(y_test, pred),
+            f1_score(y_test, pred),
+            matthews_corrcoef(y_test, pred)
+        ])
+
+    comparison_df = pd.DataFrame(
+        results,
+        columns=[
+            "Model",
+            "Accuracy",
+            "AUC",
+            "Precision",
+            "Recall",
+            "F1",
+            "MCC"
+        ]
+    )
+
+    st.dataframe(comparison_df)
