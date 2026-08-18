@@ -35,11 +35,11 @@ Upload a test dataset and evaluate the trained models.
 # Load Models
 # -----------------------------
 models = {
-    "Logistic Regression": joblib.load("logistic_regression.pkl"),
-    "Decision Tree": joblib.load("decision_tree.pkl"),
-    "KNN": joblib.load("knn.pkl"),
-    "Naive Bayes": joblib.load("naive_bayes.pkl"),
-    "Random Forest": joblib.load("random_forest.pkl")
+    "Logistic Regression": joblib.load("models/logistic_regression.pkl"),
+    "Decision Tree": joblib.load("models/decision_tree.pkl"),
+    "KNN": joblib.load("models/knn.pkl"),
+    "Naive Bayes": joblib.load("models/naive_bayes.pkl"),
+    "Random Forest": joblib.load("models/random_forest.pkl")
 }
 
 # -----------------------------
