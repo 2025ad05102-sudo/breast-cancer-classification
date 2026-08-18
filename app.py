@@ -35,11 +35,11 @@ Upload a test dataset and evaluate the trained models.
 # Load Models
 # -----------------------------
 models = {
-    "Logistic Regression": joblib.load("model/logistic_regression.pkl"),
-    "Decision Tree": joblib.load("model/decision_tree.pkl"),
-    "KNN": joblib.load("model/knn.pkl"),
-    "Naive Bayes": joblib.load("model/naive_bayes.pkl"),
-    "Random Forest": joblib.load("model/random_forest.pkl")
+    "Logistic Regression": joblib.load("logistic_regression.pkl"),
+    "Decision Tree": joblib.load("decision_tree.pkl"),
+    "KNN": joblib.load("knn.pkl"),
+    "Naive Bayes": joblib.load("naive_bayes.pkl"),
+    "Random Forest": joblib.load("random_forest.pkl")
 }
 
 # -----------------------------
@@ -87,22 +87,72 @@ if uploaded_file:
     X_test = df.drop("diagnosis", axis=1)
 
     # Remove id column if present
-    if "id" in X_test.columns:
-        X_test = X_test.drop("id", axis=1)
+# Remove unused columns
 
-    # Remove unnamed column if present
-    if "Unnamed: 32" in X_test.columns:
-        X_test = X_test.drop("Unnamed: 32", axis=1)
+if "id" in X_test.columns:
+    X_test.drop("id", axis=1, inplace=True)
+
+if "Unnamed: 32" in X_test.columns:
+    X_test.drop("Unnamed: 32", axis=1, inplace=True)
+
 
     # --------------------------------------
     # Predictions
     # --------------------------------------
+    # -----------------------------
+# Fix Feature Mismatch
+# -----------------------------
+
+try:
+
+    if hasattr(selected_model, "feature_names_in_"):
+
+        expected_cols = list(selected_model.feature_names_in_)
+
+        missing_cols = [
+            col for col in expected_cols
+            if col not in X_test.columns
+        ]
+
+        extra_cols = [
+            col for col in X_test.columns
+            if col not in expected_cols
+        ]
+
+        if missing_cols:
+            st.error(f"Missing columns: {missing_cols}")
+            st.stop()
+
+        if extra_cols:
+            st.warning(
+                f"Extra columns removed: {extra_cols}"
+            )
+
+        X_test = X_test[expected_cols]
+
     y_pred = selected_model.predict(X_test)
 
     if hasattr(selected_model, "predict_proba"):
         y_prob = selected_model.predict_proba(X_test)[:, 1]
     else:
         y_prob = y_pred
+
+except Exception as e:
+
+    st.error("Prediction failed")
+
+    st.write("Expected Columns:")
+    try:
+        st.write(list(selected_model.feature_names_in_))
+    except:
+        st.write("Not available")
+
+    st.write("Uploaded Columns:")
+    st.write(list(X_test.columns))
+
+    st.exception(e)
+
+    st.stop()
 
     # --------------------------------------
     # Metrics
