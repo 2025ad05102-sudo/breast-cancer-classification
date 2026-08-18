@@ -1,4 +1,5 @@
-pandas
+
+requirements_content = """pandas
 numpy
 scikit-learn
 joblib
@@ -6,3 +7,9 @@ matplotlib
 seaborn
 jupyter
 streamlit
+"""
+
+with open("/content/breast-cancer-classification/requirements.txt", "w") as f:
+    f.write(requirements_content)
+
+print("✅ requirements.txt created successfully")
